@@ -1,3 +1,3 @@
 # Campus Waste Intelligence System
-## Joint Prediction and Optimization of Waste Generation and Contamination
-### Focus: Forecasting Food Waste (lbs) per Campus Location
+Joint Prediction and Optimization of Waste Generation and Contamination
+Forecasting Food Waste (lbs/kgs) per Campus Location
