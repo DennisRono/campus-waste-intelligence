@@ -1,9 +1,3 @@
-/venv
-.git
-.kiro
-
-.env
-/node_modules
-/data/food_waste_augmented.csv
+venv/
 models/
-deployment_models/
+scratchpad.txt
