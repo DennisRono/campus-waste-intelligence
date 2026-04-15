@@ -108,11 +108,7 @@ def load_tree_model(model_type: str, section: str):
         with open(primary_path, "rb") as f:
             return pickle.load(f), str(primary_path)
     
-    fallback_path = Path(f"models/{model_type}/{model_type}_section_{section.upper()}.pkl")
-    if fallback_path.exists():
-        with open(fallback_path, "rb") as f:
-            return pickle.load(f), str(fallback_path)
-    return None, f"Model not found. Expected {primary_path} or {fallback_path}"
+    return None, f"Model not found. Expected {primary_path}"
 
 
 def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, target_col: str = "waste_kg") -> dict:
@@ -138,8 +134,6 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
             new_row["date"] = next_date
             new_row[target_col] = np.nan
             new_row["meal_type"] = meal
-
-            
             new_row["year"] = next_date.year
             new_row["month"] = next_date.month
             new_row["day"] = next_date.day
@@ -155,7 +149,6 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
 
             temp = pd.concat([meal_hist.iloc[-MAX_LOOKBACK:], new_row], ignore_index=True)
 
-            
             for lag in [1, 7, 14, 28]:
                 temp[f"lag_{lag}"] = temp[target_col].shift(lag)
             temp["rolling_mean_7"] = temp[target_col].shift(1).rolling(7, min_periods=1).mean()
@@ -163,7 +156,8 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
             temp["rolling_std_7"] = temp[target_col].shift(1).rolling(7, min_periods=1).std().fillna(0)
             temp["rolling_max_7"] = temp[target_col].shift(1).rolling(7, min_periods=1).max()
 
-            X_pred = temp.iloc[-1:].drop(columns=[target_col, "date"], errors="ignore")
+            section_drop = [c for c in temp.columns if c.startswith("section_") or c == "section"]
+            X_pred = temp.iloc[-1:].drop(columns=[target_col, "date"] + section_drop, errors="ignore")
             for col in X_pred.select_dtypes(include=["object", "string"]).columns:
                 X_pred[col] = X_pred[col].astype("category")
 
@@ -183,7 +177,6 @@ def render_performance_table():
     st.markdown("## 📊 Model Performance Comparison (30‑day hold‑out)")
     st.markdown("Metrics are averaged over breakfast, lunch, and dinner for each section. Baseline vs. tuned after walk‑forward cross‑validation.")
 
-    
     models = ["xgboost", "lightgbm", "sarima", "prophet"]
     all_data = []
     for m in models:
@@ -282,7 +275,6 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame|None, raw_df: pd.D
         history = history.sort_values(["date", "meal_type"])
         history_30 = history.iloc[-(30 * len(MEALS)):]
     elif raw_df is not None:
-        
         proxy = raw_df[(raw_df["location_id"] == selected_sec) & (raw_df["meal_period"] != "Other")].copy()
         proxy = proxy.rename(columns={"meal_period": "meal_type"})
         proxy["meal_type"] = proxy["meal_type"].str.lower()
@@ -335,6 +327,11 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame|None, raw_df: pd.D
             })
     fc_df = pd.DataFrame(fc_rows)
 
+    all_vals = fc_df["Waste (kg)"]
+    y_min = all_vals.min()
+    y_max = all_vals.max()
+    y_pad = max((y_max - y_min) * 0.4, 0.1)
+
     col1, col2 = st.columns([1, 2])
     with col1:
         st.dataframe(fc_df[["Date","Meal","Waste (kg)"]], width='stretch', hide_index=True)
@@ -342,8 +339,12 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame|None, raw_df: pd.D
         fig_line = px.line(fc_df, x="Day", y="Waste (kg)", color="Meal",
                            color_discrete_map=MEAL_PALETTE, markers=True,
                            category_orders={"Meal": ["Breakfast","Lunch","Dinner"]})
-        fig_line.update_layout(title=f"7‑Day Forecast by Meal — Section {selected_sec}",
-                               plot_bgcolor="white", title_font_color=DARK_GRN)
+        fig_line.update_layout(
+            title=f"7‑Day Forecast by Meal — Section {selected_sec}",
+            plot_bgcolor="white",
+            title_font_color=DARK_GRN,
+            yaxis=dict(range=[y_min - y_pad, y_max + y_pad]),
+        )
         st.plotly_chart(fig_line, width='stretch', key=str(uuid.uuid4()))
 
     daily_fc = fc_df.groupby("Date", sort=False)["Waste (kg)"].sum().reset_index()
@@ -359,7 +360,6 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame|None, raw_df: pd.D
 def main():
     st.title("🍽️ Food Waste Forecaster")
     st.markdown("**Scientific communication of forecasting models** – 7‑day forecasts using XGBoost and LightGBM, with empirical performance comparison across all four models.")
-
     
     raw_df = None
     xgb_df = None
