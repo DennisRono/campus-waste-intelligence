@@ -1,6 +1,4 @@
 import warnings
-warnings.filterwarnings("ignore")
-
 import uuid
 import pickle
 import numpy as np
@@ -10,6 +8,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 
+warnings.filterwarnings("ignore")
+
 st.set_page_config(
     page_title="Food Waste Forecaster | XGBoost & LightGBM",
     page_icon="🍽️",
@@ -17,7 +17,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------- STYLING ----------
 PRIMARY    = "#2e7d32"
 LIGHT_GRN  = "#4caf50"
 PALE_GRN   = "#e8f5e9"
@@ -47,7 +46,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- DATA LOADING ----------
+
 @st.cache_data(show_spinner="Loading raw dataset…")
 def load_raw_dataset() -> pd.DataFrame:
     df = pd.read_csv("data/synthetic_forecast_cleaned.csv")
@@ -67,7 +66,7 @@ def load_xgb_dataset() -> pd.DataFrame:
     df = pd.read_csv("data/waste_features_xgb.csv")
     df["date"] = pd.to_datetime(df[["year", "month", "day"]])
     sections_lc = ["a", "b", "c", "d"]
-    def _get_section(row) -> str:
+    def _get_section(row) -> str | None:
         for s in sections_lc:
             col = f"section_{s}"
             if col in row.index and bool(row[col]):
@@ -87,10 +86,10 @@ def load_metrics_for_model(model_name: str) -> pd.DataFrame:
         st.warning(f"Metrics file not found: {path}")
         return pd.DataFrame()
     df = pd.read_csv(path)
-    # Expected columns: section, model, meal, RMSE, MAE, MAPE, R2
-    # model column contains "Baseline" or "Tuned (Optuna)" etc.
+    
+    
     df["stage"] = df["model"].apply(lambda x: "Baseline" if "Baseline" in x else "Tuned")
-    # Average over meals for each section and stage
+    
     avg = df.groupby(["section", "stage"]).agg(
         RMSE=("RMSE", "mean"),
         MAE=("MAE", "mean"),
@@ -103,19 +102,19 @@ def load_metrics_for_model(model_name: str) -> pd.DataFrame:
 def load_tree_model(model_type: str, section: str):
     """Load tuned XGBoost or LightGBM model (per section)."""
     sec_lc = section.lower()
-    # Primary path: models/xgboost_optimized/tuned_section_a.pkl (or lightgbm_optimized)
+    
     primary_path = Path(f"models/{model_type}_optimized/tuned_section_{sec_lc}.pkl")
     if primary_path.exists():
         with open(primary_path, "rb") as f:
             return pickle.load(f), str(primary_path)
-    # Fallback: models/xgboost/xgboost_section_A.pkl etc.
+    
     fallback_path = Path(f"models/{model_type}/{model_type}_section_{section.upper()}.pkl")
     if fallback_path.exists():
         with open(fallback_path, "rb") as f:
             return pickle.load(f), str(fallback_path)
     return None, f"Model not found. Expected {primary_path} or {fallback_path}"
 
-# ---------- FORECAST FUNCTION (iterative) ----------
+
 def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, target_col: str = "waste_kg") -> dict:
     MAX_LOOKBACK = 28
     forecasts = {meal: [] for meal in MEALS}
@@ -140,7 +139,7 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
             new_row[target_col] = np.nan
             new_row["meal_type"] = meal
 
-            # Add time features
+            
             new_row["year"] = next_date.year
             new_row["month"] = next_date.month
             new_row["day"] = next_date.day
@@ -156,7 +155,7 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
 
             temp = pd.concat([meal_hist.iloc[-MAX_LOOKBACK:], new_row], ignore_index=True)
 
-            # Create lag and rolling features
+            
             for lag in [1, 7, 14, 28]:
                 temp[f"lag_{lag}"] = temp[target_col].shift(lag)
             temp["rolling_mean_7"] = temp[target_col].shift(1).rolling(7, min_periods=1).mean()
@@ -179,12 +178,12 @@ def forecast_tree_based(model, history_df: pd.DataFrame, horizon: int = 7, targe
 
     return forecasts
 
-# ---------- PERFORMANCE TABLE (aggregated from CSV) ----------
+
 def render_performance_table():
     st.markdown("## 📊 Model Performance Comparison (30‑day hold‑out)")
     st.markdown("Metrics are averaged over breakfast, lunch, and dinner for each section. Baseline vs. tuned after walk‑forward cross‑validation.")
 
-    # Load metrics for all four models
+    
     models = ["xgboost", "lightgbm", "sarima", "prophet"]
     all_data = []
     for m in models:
@@ -199,14 +198,14 @@ def render_performance_table():
         return
 
     combined = pd.concat(all_data, ignore_index=True)
-    # Pivot to have baseline and tuned columns side by side
+    
     pivot = combined.pivot_table(
         index=["model", "section"],
         columns="stage",
         values=["RMSE", "MAE", "MAPE", "R2"],
         aggfunc="first"
     ).reset_index()
-    # Flatten column names
+    
     pivot.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in pivot.columns.values]
     pivot = pivot.rename(columns={
         "model_": "Model",
@@ -220,18 +219,18 @@ def render_performance_table():
         "R2_Baseline": "R² (base)",
         "R2_Tuned": "R² (tuned)",
     })
-    # Reorder columns
+    
     order = ["Model", "Section", "RMSE (base)", "RMSE (tuned)", "MAE (base)", "MAE (tuned)",
              "MAPE (base)", "MAPE (tuned)", "R² (base)", "R² (tuned)"]
     pivot = pivot[order]
 
-    st.dataframe(pivot.round(2), use_container_width=True, hide_index=True)
+    st.dataframe(pivot.round(2), width='stretch', hide_index=True)
 
-    # Add interpretation
+    
     st.markdown("---")
     st.markdown("### 🔍 Data‑Driven Interpretation of Metrics")
 
-    # Compute average improvement for tree models vs classical
+    
     tree_models = ["XGBOOST", "LIGHTGBM"]
     classical = ["SARIMA", "PROPHET"]
     tree_improvement = pivot[pivot["Model"].isin(tree_models)]["RMSE (tuned)"].mean()
@@ -262,8 +261,8 @@ def render_performance_table():
     """)
     st.markdown("---")
 
-# ---------- FORECAST TAB (reusable) ----------
-def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame, raw_df: pd.DataFrame):
+
+def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame|None, raw_df: pd.DataFrame|None):
     st.header(f"🔮 7‑Day Forecast — {model_type.upper()}")
     st.markdown(f"""
     The {model_type.upper()} model generates a **daily forecast** by iteratively predicting one day ahead,
@@ -277,13 +276,13 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame, raw_df: pd.DataFr
         st.warning(f"⚠️ {model_type.upper()} model not found for section {selected_sec}.\n\n{info}")
         return
 
-    # Prepare history (last 30 days of daily aggregated data)
+    
     if xgb_df is not None:
         history = xgb_df[xgb_df["section"] == selected_sec].copy()
         history = history.sort_values(["date", "meal_type"])
         history_30 = history.iloc[-(30 * len(MEALS)):]
     elif raw_df is not None:
-        # Fallback: aggregate from raw 30‑min data
+        
         proxy = raw_df[(raw_df["location_id"] == selected_sec) & (raw_df["meal_period"] != "Other")].copy()
         proxy = proxy.rename(columns={"meal_period": "meal_type"})
         proxy["meal_type"] = proxy["meal_type"].str.lower()
@@ -338,30 +337,30 @@ def render_forecast_tab(model_type: str, xgb_df: pd.DataFrame, raw_df: pd.DataFr
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.dataframe(fc_df[["Date","Meal","Waste (kg)"]], use_container_width=True, hide_index=True)
+        st.dataframe(fc_df[["Date","Meal","Waste (kg)"]], width='stretch', hide_index=True)
     with col2:
         fig_line = px.line(fc_df, x="Day", y="Waste (kg)", color="Meal",
                            color_discrete_map=MEAL_PALETTE, markers=True,
                            category_orders={"Meal": ["Breakfast","Lunch","Dinner"]})
         fig_line.update_layout(title=f"7‑Day Forecast by Meal — Section {selected_sec}",
                                plot_bgcolor="white", title_font_color=DARK_GRN)
-        st.plotly_chart(fig_line, use_container_width=True, key=str(uuid.uuid4()))
+        st.plotly_chart(fig_line, width='stretch', key=str(uuid.uuid4()))
 
     daily_fc = fc_df.groupby("Date", sort=False)["Waste (kg)"].sum().reset_index()
     fig_bar = px.bar(daily_fc, x="Date", y="Waste (kg)", color_discrete_sequence=[PRIMARY])
     fig_bar.update_layout(title=f"Forecasted Total Daily Waste — Section {selected_sec}",
                           plot_bgcolor="white", title_font_color=DARK_GRN)
-    st.plotly_chart(fig_bar, use_container_width=True, key=str(uuid.uuid4()))
+    st.plotly_chart(fig_bar, width='stretch', key=str(uuid.uuid4()))
 
     total_7d = fc_df["Waste (kg)"].sum()
     st.metric("📦 Total Forecasted Waste (7 days)", f"{total_7d:.1f} kg")
 
-# ---------- MAIN ----------
+
 def main():
     st.title("🍽️ Food Waste Forecaster")
     st.markdown("**Scientific communication of forecasting models** – 7‑day forecasts using XGBoost and LightGBM, with empirical performance comparison across all four models.")
 
-    # Load data
+    
     raw_df = None
     xgb_df = None
     try:
@@ -373,10 +372,10 @@ def main():
     except FileNotFoundError:
         st.warning("⚠️ `data/waste_features_xgb.csv` not found. Some lag features may be missing. Using raw aggregation fallback.")
 
-    # Performance table (from CSVs)
+    
     render_performance_table()
 
-    # Tabs for XGBoost and LightGBM only
+    
     tab_xgb, tab_lgb = st.tabs(["🌲 XGBoost Forecast", "💡 LightGBM Forecast"])
 
     with tab_xgb:
@@ -393,3 +392,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
