@@ -14,7 +14,7 @@ LOC_COMMODITY_MAP = {
 }
 
 
-def load_baselines(fao_path, unep_path):
+def load_baselines(fao_path, unep_path) -> dict[str, dict]:
     fao = pd.read_csv(fao_path)
     unep = pd.read_csv(unep_path)
 
@@ -110,7 +110,7 @@ def build_dataset(locations, n_days=365, start=datetime(2018, 1, 1)):
     return pd.DataFrame(records)
 
 
-def engineer_features(df):
+def engineer_features(df) -> dict:
     df["dow_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
     df["dow_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
     df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
@@ -130,8 +130,6 @@ if __name__ == "__main__":
     df = build_dataset(locations)
     df = engineer_features(df)
 
-    print(f"Dataset: {df.shape[0]:,} rows x {df.shape[1]} columns")
-    print(f"Contamination prevalence: {df['is_contaminated'].mean():.1%}")
-
     df.to_csv("./data/bins.csv", index=False)
     print("Saved to ./data/bins.csv")
+    
